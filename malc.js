@@ -40,7 +40,39 @@ function generateId(prefix) {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// ========== COLORED TEXT FUNCTIONS (SAFE VERSION) ==========
+// ========== COLORED TEXT FUNCTION (STANDALONE) ==========
+function coloredText(str, x, y, horizontal, vertical, maxWidth) {
+    const p = _p5.prototype; // Use the current p5 instance
+    const parts = parseColoredText(str);
+    let currentX = x;
+    let currentY = y;
+    
+    p.push();
+    p.textAlign(horizontal || LEFT, vertical || BASELINE);
+    
+    for (const part of parts) {
+        if (part.isNewline) {
+            currentX = x;
+            currentY += p.textLeading() || p.textSize() * 1.2;
+            continue;
+        }
+        
+        if (part.color) {
+            try {
+                p.fill(part.color);
+            } catch (e) {
+                p.fill(255);
+            }
+        }
+        
+        p.text(part.text, currentX, currentY, maxWidth);
+        currentX += p.textWidth(part.text);
+    }
+    
+    p.pop();
+}
+
+// Keep these helper functions (they don't need to change)
 function parseColoredLine(str) {
     const regex = /\\([^|\\\n]+)\|([^|]+)\|/g;
     const parts = [];
@@ -93,36 +125,6 @@ function parseColoredText(str) {
     }
     
     return result;
-}
-
-function renderColoredText(p, str, x, y, horizontal, vertical, maxWidth) {
-    const parts = parseColoredText(str);
-    let currentX = x;
-    let currentY = y;
-    
-    p.push();
-    p.textAlign(horizontal, vertical);
-    
-    for (const part of parts) {
-        if (part.isNewline) {
-            currentX = x;
-            currentY += p.textLeading() || p.textSize() * 1.2;
-            continue;
-        }
-        
-        if (part.color) {
-            try {
-                p.fill(part.color);
-            } catch (e) {
-                p.fill(255);
-            }
-        }
-        
-        p.text(part.text, currentX, currentY, maxWidth);
-        currentX += p.textWidth(part.text);
-    }
-    
-    p.pop();
 }
 
 // ========== SCENE CLASS (DEFINED FIRST) ==========
@@ -1132,48 +1134,44 @@ class Button extends gameObject {
     }
 
     render() {
-        if (!this.active) return;
-        
-        let btnFormat = this.formatting.button;
-        let buttonColor;
-        
-        if (this.isDisabled) {
-            buttonColor = btnFormat.colors.disabled;
-        } else if (this.isPressed) {
-            buttonColor = btnFormat.colors.pressed;
-        } else if (this.isHovered) {
-            buttonColor = btnFormat.colors.hover;
-        } else {
-            buttonColor = btnFormat.colors.normal;
-        }
-        
-        let originalColor = this.formatting.color;
-        this.formatting.color = buttonColor;
-        
-        super.render();
-        
-        if(!this.visible) return;
-        
-        _p5.prototype.push();
-        _p5.prototype.translate(this.x, this.y);
-        if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
-        _p5.prototype.rotate(this.rotation);
-        
-        _p5.prototype.textStyle(btnFormat.text.style);
-        _p5.prototype.textSize(btnFormat.text.size);
-        _p5.prototype.fill(btnFormat.text.color);
-        
-        // Use colored text if available, otherwise use normal text
-        if (_p5.prototype.coloredText) {
-            _p5.prototype.coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
-        } else {
-            _p5.prototype.text(btnFormat.text.display, 0, 0);
-        }
-        
-        _p5.prototype.pop();
-        
-        this.formatting.color = originalColor;
+    if (!this.active) return;
+    
+    let btnFormat = this.formatting.button;
+    let buttonColor;
+    
+    if (this.isDisabled) {
+        buttonColor = btnFormat.colors.disabled;
+    } else if (this.isPressed) {
+        buttonColor = btnFormat.colors.pressed;
+    } else if (this.isHovered) {
+        buttonColor = btnFormat.colors.hover;
+    } else {
+        buttonColor = btnFormat.colors.normal;
     }
+    
+    let originalColor = this.formatting.color;
+    this.formatting.color = buttonColor;
+    
+    super.render();
+    
+    if(!this.visible) return;
+    
+    _p5.prototype.push();
+    _p5.prototype.translate(this.x, this.y);
+    if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
+    _p5.prototype.rotate(this.rotation);
+    
+    _p5.prototype.textStyle(btnFormat.text.style);
+    _p5.prototype.textSize(btnFormat.text.size);
+    _p5.prototype.fill(btnFormat.text.color);
+    
+    // Use the standalone coloredText function
+    coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
+    
+    _p5.prototype.pop();
+    
+    this.formatting.color = originalColor;
+}
     
     // ========== BUTTON-SPECIFIC HELPER METHODS ==========
     
@@ -2559,7 +2557,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.3",
+    version: "1.0.4", // Increment version
     
     // Core classes
     gameObject: gameObject,
@@ -2585,6 +2583,7 @@ const MALC = {
     // Utility functions
     generateId: generateId,
     getTimestamp: getTimestamp,
+    coloredText: coloredText, // Add this line
     
     // Gravity constants
     GRAVITY: GRAVITY,
@@ -2688,50 +2687,39 @@ const MALC = {
         this.mouse = new MouseHandler();
         window.mouse = this.mouse;
         
-        // Add coloredText method to p5 instance safely
-        if (!_p5.prototype.coloredText) {
-            _p5.prototype.coloredText = function(str, x, y, horizontal, vertical, maxWidth) {
-                renderColoredText(this, str, x, y, horizontal || LEFT, vertical || BASELINE, maxWidth);
-                return this;
-            };
-        }
+        
         
         // Start FPS tracking
         refreshLoop();
         
         // Create default scenes
-        new Scene("blank", 70);
-        new Scene("loading", 50, function(self) {
-            try {
-                _p5.prototype.textSize(24);
-                let timed = (self.timeActive / 250 % 4);
-                let dots = "";
-                
-                if (timed < 1) dots = ".";
-                else if (timed < 2) dots = "..";
-                else if (timed < 3) dots = "...";
-                
-                if (_p5.prototype.coloredText) {
-                    _p5.prototype.coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
-                } else {
-                    _p5.prototype.text(`Loading Game${dots}`, 120, 200);
-                }
-                
-                _p5.prototype.textSize(16);
-                
-                let num = (Math.floor(self.timeActive / 100) / 10);
-                let percentText = `${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}`;
-                
-                if (_p5.prototype.coloredText) {
-                    _p5.prototype.coloredText(`\\red|${percentText}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
-                } else {
-                    _p5.prototype.text(percentText, 200, 225);
-                }
-            } catch (e) {
-                // Fallback if coloredText fails
-                _p5.prototype.text(`Loading Game...`, 120, 200);
-            }
-        });
+        // Create default scenes
+new Scene("blank", 70);
+new Scene("loading", 50, function(self) {
+    try {
+        _p5.prototype.textSize(24);
+        let timed = (self.timeActive / 250 % 4);
+        let dots = "";
+        
+        if (timed < 1) dots = ".";
+        else if (timed < 2) dots = "..";
+        else if (timed < 3) dots = "...";
+        
+        // Use standalone coloredText function
+        coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
+        
+        _p5.prototype.textSize(16);
+        
+        let num = (Math.floor(self.timeActive / 100) / 10);
+        let percentText = `${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}`;
+        
+        // Use standalone coloredText function
+        coloredText(`\\red|${percentText}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
+    } catch (e) {
+        // Fallback if coloredText fails
+        _p5.prototype.text(`Loading Game...`, 120, 200);
+    }
+});
         
         Scene.activeScene = "loading";
         
@@ -2772,3 +2760,4 @@ MALC.mouse = new MouseHandler();
 return MALC;
 
 }));
+
