@@ -17,6 +17,9 @@
     }
 }(typeof self !== 'undefined' ? self : this, function(p5) {
 
+// Store reference to p5 instance
+const _p5 = p5;
+
 // ========== GLOBAL ARRAYS ==========
 const MALCgameObjects = [];
 const MALCbuttons = [];
@@ -35,6 +38,409 @@ function getTimestamp() {
 
 function generateId(prefix) {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// ========== SCENE CLASS (DEFINED FIRST) ==========
+class Scene {
+    static scenes = [];
+    static activeScene = "blank";
+    static started = false;
+    static sceneHistory = [];
+    static historyLimit = 10;
+
+    static update() {
+        this.started = true;
+        this.scenes = MALCScene;
+        
+        let activeSceneFound = false;
+        
+        this.scenes.forEach(S => {
+            if (S.id == this.activeScene) {
+                activeSceneFound = true;
+                
+                this.scenes.forEach(s => {
+                    if (s != S) {
+                        s._active = false;
+                        s.active = false;
+                        
+                        s.objects.forEach(o => {
+                            if (o && typeof o.active !== 'undefined') o.active = false;
+                        });
+                    }
+                });
+                
+                S.active = true;
+                
+                if (!S._active) {
+                    S.activated = MALC.time.getTime();
+                    if (typeof S.onActivate == 'function') S.onActivate();
+                }
+                
+                S._active = true;
+                S.timeActive = MALC.time.getTime() - S.activated;
+                
+                S.objects.forEach(o => {
+                    if (o && typeof o.active !== 'undefined') o.active = true;
+                });
+                
+                _p5.prototype.push();
+                if (window.camera && typeof camera.render == 'function') {
+                    camera.render();
+                }
+                
+                S.render();
+                
+                _p5.prototype.pop();
+            }
+        });
+        
+        if (!activeSceneFound && this.activeScene != "blank") {
+            console.warn(`Scene "${this.activeScene}" not found, switching to blank`);
+            this.activeScene = "blank";
+        }
+    }
+    
+    static getSceneById(id) {
+        return MALCScene.find(scene => scene.id == id) || null;
+    }
+    
+    static getActiveScene() {
+        return this.getSceneById(this.activeScene);
+    }
+    
+    static switchToScene(id, addToHistory = true) {
+        let scene = this.getSceneById(id);
+        if (scene) {
+            if (addToHistory && this.activeScene) {
+                this.sceneHistory.push(this.activeScene);
+                if (this.sceneHistory.length > this.historyLimit) {
+                    this.sceneHistory.shift();
+                }
+            }
+            this.activeScene = id;
+        } else {
+            console.error(`Cannot switch to scene "${id}" - not found`);
+        }
+    }
+    
+    static goBack() {
+        if (this.sceneHistory.length > 0) {
+            let previousScene = this.sceneHistory.pop();
+            this.switchToScene(previousScene, false);
+            return true;
+        }
+        return false;
+    }
+    
+    static getAllScenes() {
+        return [...MALCScene];
+    }
+    
+    static getScenesWithObject(object) {
+        return MALCScene.filter(scene => scene.objects.includes(object));
+    }
+    
+    static getScenesByTag(tag) {
+        return MALCScene.filter(scene => scene.hasTag(tag));
+    }
+
+    constructor(id, backgroundColor, ...scripts) {
+        MALCScene.forEach(s => {
+            if (s.id == id || typeof id != "string") {
+                throw new Error(`Scenes must have unique IDs and be strings. Duplicate/Invalid ID: "${id}"`);
+            }
+        });
+        
+        this.id = id;
+        this.backColor = backgroundColor;
+        this.scripts = scripts;
+        
+        this.objects = [];
+        this.uiPlanes = [];
+        
+        this.active = false;
+        this._active = false;
+        this.activated = 0;
+        this.timeActive = -1;
+        
+        this.tags = [];
+        this.paused = false;
+        this.transition = null;
+        this.onActivateCallbacks = [];
+        this.onDeactivateCallbacks = [];
+        this.onUpdateCallbacks = [];
+        
+        this.sceneInstance = MALCScene.length;
+        MALCScene.push(this);
+    }
+    
+    render() {
+        if (this.paused) return;
+        
+        if (this.transition) {
+            this.applyTransition();
+        }
+        
+        _p5.prototype.background(this.backColor);
+        
+        this.scripts.forEach(exe => {
+            if (typeof exe == "function") exe(this);
+        });
+        
+        this.onUpdateCallbacks.forEach(cb => {
+            if (typeof cb == "function") cb(this);
+        });
+        
+        this.objects.forEach(o => {
+            if (o && typeof o.update == "function") {
+                o.update(true);
+            }
+            if (o && typeof o.render == "function") {
+                o.render();
+            }
+        });
+        
+        if (typeof UIPlanes !== 'undefined' && UIPlanes.length > 0) {
+            UIPlanes.forEach(ui => {
+                if (ui && typeof ui.belongsToScene == "function" && ui.belongsToScene(this.id)) {
+                    ui.render();
+                }
+            });
+        }
+        
+        this.uiPlanes.forEach(ui => {
+            if (ui && typeof ui.render == "function") {
+                ui.render();
+            }
+        });
+        
+        MALCScene[this.sceneInstance] = this;
+    }
+    
+    applyTransition() {
+        if (!this.transition || !this.transition.active) return;
+        
+        this.transition.progress += 1/60;
+        
+        if (this.transition.progress >= this.transition.duration) {
+            this.transition.active = false;
+            this.transition = null;
+            return;
+        }
+        
+        let t = this.transition.progress / this.transition.duration;
+        
+        _p5.prototype.push();
+        switch(this.transition.type) {
+            case "fade":
+                _p5.prototype.fill(0, 255 * (1 - t));
+                _p5.prototype.rect(0, 0, _p5.prototype.width, _p5.prototype.height);
+                break;
+            case "slide":
+                _p5.prototype.translate(_p5.prototype.width * (1 - t), 0);
+                break;
+        }
+        _p5.prototype.pop();
+    }
+    
+    addObject(object) {
+        if (object && !this.objects.includes(object)) {
+            this.objects.push(object);
+            if (typeof object.addToScene == "function") {
+                object.addToScene(this.id);
+            }
+        }
+        return this;
+    }
+    
+    addObjects(objects) {
+        objects.forEach(obj => this.addObject(obj));
+        return this;
+    }
+    
+    removeObject(object) {
+        this.objects = this.objects.filter(obj => obj != object);
+        if (object && typeof object.removeFromScene == "function") {
+            object.removeFromScene(this.id);
+        }
+        return this;
+    }
+    
+    clearObjects() {
+        this.objects.forEach(obj => {
+            if (obj && typeof obj.removeFromScene == "function") {
+                obj.removeFromScene(this.id);
+            }
+        });
+        this.objects = [];
+        return this;
+    }
+    
+    getObjects(filter) {
+        if (typeof filter == "function") {
+            return this.objects.filter(filter);
+        } else if (filter == "button") {
+            return this.objects.filter(obj => obj instanceof Button);
+        } else if (filter == "gameObject") {
+            return this.objects.filter(obj => obj instanceof gameObject);
+        }
+        return this.objects;
+    }
+    
+    getObjectById(id) {
+        return this.objects.find(obj => obj && obj.id == id);
+    }
+    
+    addUIPlane(uiPlane) {
+        if (uiPlane && !this.uiPlanes.includes(uiPlane)) {
+            this.uiPlanes.push(uiPlane);
+            if (typeof uiPlane.addToScene == "function") {
+                uiPlane.addToScene(this.id);
+            }
+        }
+        return this;
+    }
+    
+    removeUIPlane(uiPlane) {
+        this.uiPlanes = this.uiPlanes.filter(ui => ui != uiPlane);
+        if (uiPlane && typeof uiPlane.removeFromScene == "function") {
+            uiPlane.removeFromScene(this.id);
+        }
+        return this;
+    }
+    
+    clearUIPlanes() {
+        this.uiPlanes.forEach(ui => {
+            if (ui && typeof ui.removeFromScene == "function") {
+                ui.removeFromScene(this.id);
+            }
+        });
+        this.uiPlanes = [];
+        return this;
+    }
+    
+    addScript(script) {
+        if (typeof script == "function" && !this.scripts.includes(script)) {
+            this.scripts.push(script);
+        }
+        return this;
+    }
+    
+    removeScript(script) {
+        this.scripts = this.scripts.filter(s => s != script);
+        return this;
+    }
+    
+    clearScripts() {
+        this.scripts = [];
+        return this;
+    }
+    
+    onActivate(callback) {
+        if (typeof callback == "function") {
+            this.onActivateCallbacks.push(callback);
+        }
+        return this;
+    }
+    
+    onDeactivate(callback) {
+        if (typeof callback == "function") {
+            this.onDeactivateCallbacks.push(callback);
+        }
+        return this;
+    }
+    
+    onUpdate(callback) {
+        if (typeof callback == "function") {
+            this.onUpdateCallbacks.push(callback);
+        }
+        return this;
+    }
+    
+    pause() {
+        this.paused = true;
+        return this;
+    }
+    
+    resume() {
+        this.paused = false;
+        return this;
+    }
+    
+    setTransition(type, duration = 1.0) {
+        this.transition = {
+            type: type,
+            duration: duration,
+            progress: 0,
+            active: true
+        };
+        return this;
+    }
+    
+    addTag(tag) {
+        if (!this.tags.includes(tag)) {
+            this.tags.push(tag);
+        }
+        return this;
+    }
+    
+    removeTag(tag) {
+        this.tags = this.tags.filter(t => t != tag);
+        return this;
+    }
+    
+    hasTag(tag) {
+        return this.tags.includes(tag);
+    }
+    
+    reset() {
+        this.clearObjects();
+        this.clearUIPlanes();
+        this.clearScripts();
+        this.onActivateCallbacks = [];
+        this.onDeactivateCallbacks = [];
+        this.onUpdateCallbacks = [];
+        this.tags = [];
+        this.paused = false;
+        this.transition = null;
+        this.timeActive = 0;
+        return this;
+    }
+    
+    destroy() {
+        let index = MALCScene.indexOf(this);
+        if (index > -1) {
+            MALCScene.splice(index, 1);
+        }
+        
+        this.clearObjects();
+        this.clearUIPlanes();
+        
+        if (Scene.activeScene == this.id) {
+            Scene.activeScene = "blank";
+        }
+    }
+    
+    clone(newId) {
+        let clone = new Scene(newId || this.id + "_copy", this.backColor, ...this.scripts);
+        clone.objects = [...this.objects];
+        clone.uiPlanes = [...this.uiPlanes];
+        clone.tags = [...this.tags];
+        return clone;
+    }
+    
+    getInfo() {
+        return {
+            id: this.id,
+            active: this.active,
+            timeActive: this.timeActive,
+            objectCount: this.objects.length,
+            uiPlaneCount: this.uiPlanes.length,
+            scriptCount: this.scripts.length,
+            tags: this.tags,
+            paused: this.paused
+        };
+    }
 }
 
 // ========== GAME OBJECT CLASS WITH GRAVITY ==========
@@ -264,7 +670,7 @@ class gameObject {
             }
 
             let rot = linked ? 
-                (this.rotationMode == "degrees" ? (this.rotation) : radians(this.rotation)) : 
+                (this.rotationMode == "degrees" ? (this.rotation) : _p5.prototype.radians(this.rotation)) : 
                 (this.rotationMode == "degrees" ? (this.velocity[1]) : (this.velocity[1]));
             
             if(isNaN(rot)){
@@ -272,8 +678,8 @@ class gameObject {
                 rot = 0;
             }
             
-            let vx = vel * cos(rot);
-            let vy = vel * sin(rot);
+            let vx = vel * _p5.prototype.cos(rot);
+            let vy = vel * _p5.prototype.sin(rot);
 
             this.velocityMatrix = [vx, vy];
             
@@ -314,44 +720,44 @@ class gameObject {
         
         // Draw debug hitbox if enabled
         if (this.debug) {
-            push();
-            translate(this.x, this.y);
-            rectMode(CENTER);
-            if (this.rotationMode == "degrees") angleMode(DEGREES);
-            rotate(this.rotation + hb.rotation);
+            _p5.prototype.push();
+            _p5.prototype.translate(this.x, this.y);
+            _p5.prototype.rectMode(_p5.prototype.CENTER);
+            if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
+            _p5.prototype.rotate(this.rotation + hb.rotation);
 
-            stroke("#00FF27");
-            strokeWeight(hb.outline);
-            noFill();
-            rect(hb.x, hb.y, this.width + hb.width, this.height + hb.height);
+            _p5.prototype.stroke("#00FF27");
+            _p5.prototype.strokeWeight(hb.outline);
+            _p5.prototype.noFill();
+            _p5.prototype.rect(hb.x, hb.y, this.width + hb.width, this.height + hb.height);
             
             // Draw gravity indicator if enabled
             if (this.gravity.enabled) {
-                stroke(0, 255, 0, 100);
-                line(0, 0, 0, this.gravity.velocity * 5);
+                _p5.prototype.stroke(0, 255, 0, 100);
+                _p5.prototype.line(0, 0, 0, this.gravity.velocity * 5);
             }
             
-            pop();
+            _p5.prototype.pop();
         }
         
         if (!this.visible) return;
         
-        push();
-        translate(this.x, this.y);
-        rectMode(CENTER);
-        if (this.rotationMode == "degrees") angleMode(DEGREES);
-        rotate(this.rotation);
+        _p5.prototype.push();
+        _p5.prototype.translate(this.x, this.y);
+        _p5.prototype.rectMode(_p5.prototype.CENTER);
+        if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
+        _p5.prototype.rotate(this.rotation);
         
         if (outline[0]) {
-            strokeWeight(outline[1]);
-            stroke(outline[2]);
+            _p5.prototype.strokeWeight(outline[1]);
+            _p5.prototype.stroke(outline[2]);
         } else {
-            noStroke();
+            _p5.prototype.noStroke();
         }
         
-        fill(this.formatting.color);
-        rect(0, 0, this.width, this.height);
-        pop();
+        _p5.prototype.fill(this.formatting.color);
+        _p5.prototype.rect(0, 0, this.width, this.height);
+        _p5.prototype.pop();
     }
 
     // ========== HELPFUL METHODS ==========
@@ -416,7 +822,7 @@ class gameObject {
     directionTo(x, y, err = 0.5) {
         let pa = [x - this.x, y - this.y];
         
-        let angle = (x && y) ? atan(pa[1]/pa[0]) : this.rotation;
+        let angle = (x && y) ? _p5.prototype.atan(pa[1]/pa[0]) : this.rotation;
         var quads = [
             pa[0] < -err && pa[1] > err,
             pa[0] < -err && pa[1] < -err,
@@ -426,7 +832,7 @@ class gameObject {
             (pa[1] < err && pa[1] > -err),
         ];
         
-        let da = (Math.atan(pa[1]/pa[0])*180)/Math.PI;
+        let da = (_p5.prototype.atan(pa[1]/pa[0]) * 180)/Math.PI;
         
         if((pa[1] > -err && pa[1] < err) && (pa[0] > -err && pa[0] < err)){
             angle = NaN;
@@ -541,9 +947,9 @@ class Button extends gameObject {
             b.isHovered = b.events.hover();
             
             if (MALCbuttons.every(b => !b.events.hover())) {
-                cursor();
+                _p5.prototype.cursor();
             } else if (b.isHovered) {
-                cursor(b.cursor);
+                _p5.prototype.cursor(b.cursor);
             }
         });
     }
@@ -591,21 +997,21 @@ class Button extends gameObject {
         this.events = {
             hover: (err = 0) => {
                 return !this.isDisabled && (
-                    mouse.x < this.x + this.width / 2 + err &&
-                    mouse.x > this.x - (this.width / 2 + err) &&
-                    mouse.y < this.y + this.height / 2 + err &&
-                    mouse.y > this.y - (this.height / 2 + err)
+                    window.mouse.x < this.x + this.width / 2 + err &&
+                    window.mouse.x > this.x - (this.width / 2 + err) &&
+                    window.mouse.y < this.y + this.height / 2 + err &&
+                    window.mouse.y > this.y - (this.height / 2 + err)
                 );
             },
             pressed: () => {
-                return this.events.hover() && mouse.down;
+                return this.events.hover() && window.mouse.down;
             },
             clicked: () => {
                 let wasPressed = this.wasPressed;
                 let isHovering = this.events.hover();
-                let mouseReleased = !mouse.down && wasPressed;
+                let mouseReleased = !window.mouse.down && wasPressed;
 
-                this.wasPressed = mouse.down && isHovering;
+                this.wasPressed = window.mouse.down && isHovering;
 
                 return mouseReleased && isHovering;
             }
@@ -663,16 +1069,16 @@ class Button extends gameObject {
         
         if(!this.visible) return;
         
-        push();
-        translate(this.x, this.y);
-        if (this.rotationMode == "degrees") angleMode(DEGREES);
-        rotate(this.rotation);
+        _p5.prototype.push();
+        _p5.prototype.translate(this.x, this.y);
+        if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
+        _p5.prototype.rotate(this.rotation);
         
-        textStyle(btnFormat.text.style);
-        textSize(btnFormat.text.size);
-        fill(btnFormat.text.color);
-        coloredText(btnFormat.text.display, 0, 0, CENTER, CENTER);
-        pop();
+        _p5.prototype.textStyle(btnFormat.text.style);
+        _p5.prototype.textSize(btnFormat.text.size);
+        _p5.prototype.fill(btnFormat.text.color);
+        _p5.prototype.coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
+        _p5.prototype.pop();
         
         this.formatting.color = originalColor;
     }
@@ -685,8 +1091,8 @@ class Button extends gameObject {
     }
     
     getRGBFromColor(colorInput) {
-        let c = color(colorInput);
-        return [red(c), green(c), blue(c)];
+        let c = _p5.prototype.color(colorInput);
+        return [_p5.prototype.red(c), _p5.prototype.green(c), _p5.prototype.blue(c)];
     }
     
     getBrightness(colorInput) {
@@ -696,8 +1102,8 @@ class Button extends gameObject {
     
     scaleColor(baseColor, scaleFactor) {
         let rgb = this.getRGBFromColor(baseColor);
-        let scaledRGB = rgb.map(val => constrain(val * scaleFactor, 0, 255));
-        return color(scaledRGB);
+        let scaledRGB = rgb.map(val => _p5.prototype.constrain(val * scaleFactor, 0, 255));
+        return _p5.prototype.color(scaledRGB);
     }
     
     setColors(normal, hover = null, pressed = null, disabled = null) {
@@ -716,12 +1122,12 @@ class Button extends gameObject {
             hover = this.scaleColor(normal, hoverScale);
             pressed = this.scaleColor(normal, pressedScale);
         } else {
-            hover = color(hover);
-            pressed = color(pressed);
+            hover = _p5.prototype.color(hover);
+            pressed = _p5.prototype.color(pressed);
         }
         
-        let normalColor = color(normal);
-        let disabledColor = disabled !== null ? color(disabled) : null;
+        let normalColor = _p5.prototype.color(normal);
+        let disabledColor = disabled !== null ? _p5.prototype.color(disabled) : null;
         
         this.formatting.button.colors.normal = normalColor;
         this.formatting.button.colors.hover = hover;
@@ -749,409 +1155,6 @@ class Button extends gameObject {
             call();
         }
         return this.events.clicked();
-    }
-}
-
-// ========== SCENE CLASS ==========
-class Scene {
-    static scenes = [];
-    static activeScene = "blank";
-    static started = false;
-    static sceneHistory = [];
-    static historyLimit = 10;
-
-    static update() {
-        this.started = true;
-        this.scenes = MALCScene;
-        
-        let activeSceneFound = false;
-        
-        this.scenes.forEach(S => {
-            if (S.id == this.activeScene) {
-                activeSceneFound = true;
-                
-                this.scenes.forEach(s => {
-                    if (s != S) {
-                        s._active = false;
-                        s.active = false;
-                        
-                        s.objects.forEach(o => {
-                            if (o && typeof o.active !== 'undefined') o.active = false;
-                        });
-                    }
-                });
-                
-                S.active = true;
-                
-                if (!S._active) {
-                    S.activated = MALC.time.getTime();
-                    if (typeof S.onActivate == 'function') S.onActivate();
-                }
-                
-                S._active = true;
-                S.timeActive = MALC.time.getTime() - S.activated;
-                
-                S.objects.forEach(o => {
-                    if (o && typeof o.active !== 'undefined') o.active = true;
-                });
-                
-                push();
-                if (window.camera && typeof camera.render == 'function') {
-                    camera.render();
-                }
-                
-                S.render();
-                
-                pop();
-            }
-        });
-        
-        if (!activeSceneFound && this.activeScene != "blank") {
-            console.warn(`Scene "${this.activeScene}" not found, switching to blank`);
-            this.activeScene = "blank";
-        }
-    }
-    
-    static getSceneById(id) {
-        return MALCScene.find(scene => scene.id == id) || null;
-    }
-    
-    static getActiveScene() {
-        return this.getSceneById(this.activeScene);
-    }
-    
-    static switchToScene(id, addToHistory = true) {
-        let scene = this.getSceneById(id);
-        if (scene) {
-            if (addToHistory && this.activeScene) {
-                this.sceneHistory.push(this.activeScene);
-                if (this.sceneHistory.length > this.historyLimit) {
-                    this.sceneHistory.shift();
-                }
-            }
-            this.activeScene = id;
-        } else {
-            console.error(`Cannot switch to scene "${id}" - not found`);
-        }
-    }
-    
-    static goBack() {
-        if (this.sceneHistory.length > 0) {
-            let previousScene = this.sceneHistory.pop();
-            this.switchToScene(previousScene, false);
-            return true;
-        }
-        return false;
-    }
-    
-    static getAllScenes() {
-        return [...MALCScene];
-    }
-    
-    static getScenesWithObject(object) {
-        return MALCScene.filter(scene => scene.objects.includes(object));
-    }
-    
-    static getScenesByTag(tag) {
-        return MALCScene.filter(scene => scene.hasTag(tag));
-    }
-
-    constructor(id, backgroundColor, ...scripts) {
-        MALCScene.forEach(s => {
-            if (s.id == id || typeof id != "string") {
-                throw new Error(`Scenes must have unique IDs and be strings. Duplicate/Invalid ID: "${id}"`);
-            }
-        });
-        
-        this.id = id;
-        this.backColor = backgroundColor;
-        this.scripts = scripts;
-        
-        this.objects = [];
-        this.uiPlanes = [];
-        
-        this.active = false;
-        this._active = false;
-        this.activated = 0;
-        this.timeActive = -1;
-        
-        this.tags = [];
-        this.paused = false;
-        this.transition = null;
-        this.onActivateCallbacks = [];
-        this.onDeactivateCallbacks = [];
-        this.onUpdateCallbacks = [];
-        
-        this.sceneInstance = MALCScene.length;
-        MALCScene.push(this);
-    }
-    
-    render() {
-        if (this.paused) return;
-        
-        if (this.transition) {
-            this.applyTransition();
-        }
-        
-        background(this.backColor);
-        
-        this.scripts.forEach(exe => {
-            if (typeof exe == "function") exe(this);
-        });
-        
-        this.onUpdateCallbacks.forEach(cb => {
-            if (typeof cb == "function") cb(this);
-        });
-        
-        this.objects.forEach(o => {
-            if (o && typeof o.update == "function") {
-                o.update(true);
-            }
-            if (o && typeof o.render == "function") {
-                o.render();
-            }
-        });
-        
-        if (typeof UIPlanes !== 'undefined' && UIPlanes.length > 0) {
-            UIPlanes.forEach(ui => {
-                if (ui && typeof ui.belongsToScene == "function" && ui.belongsToScene(this.id)) {
-                    ui.render();
-                }
-            });
-        }
-        
-        this.uiPlanes.forEach(ui => {
-            if (ui && typeof ui.render == "function") {
-                ui.render();
-            }
-        });
-        
-        MALCScene[this.sceneInstance] = this;
-    }
-    
-    applyTransition() {
-        if (!this.transition || !this.transition.active) return;
-        
-        this.transition.progress += 1/60;
-        
-        if (this.transition.progress >= this.transition.duration) {
-            this.transition.active = false;
-            this.transition = null;
-            return;
-        }
-        
-        let t = this.transition.progress / this.transition.duration;
-        
-        push();
-        switch(this.transition.type) {
-            case "fade":
-                fill(0, 255 * (1 - t));
-                rect(0, 0, width, height);
-                break;
-            case "slide":
-                translate(width * (1 - t), 0);
-                break;
-        }
-        pop();
-    }
-    
-    addObject(object) {
-        if (object && !this.objects.includes(object)) {
-            this.objects.push(object);
-            if (typeof object.addToScene == "function") {
-                object.addToScene(this.id);
-            }
-        }
-        return this;
-    }
-    
-    addObjects(objects) {
-        objects.forEach(obj => this.addObject(obj));
-        return this;
-    }
-    
-    removeObject(object) {
-        this.objects = this.objects.filter(obj => obj != object);
-        if (object && typeof object.removeFromScene == "function") {
-            object.removeFromScene(this.id);
-        }
-        return this;
-    }
-    
-    clearObjects() {
-        this.objects.forEach(obj => {
-            if (obj && typeof obj.removeFromScene == "function") {
-                obj.removeFromScene(this.id);
-            }
-        });
-        this.objects = [];
-        return this;
-    }
-    
-    getObjects(filter) {
-        if (typeof filter == "function") {
-            return this.objects.filter(filter);
-        } else if (filter == "button") {
-            return this.objects.filter(obj => obj instanceof Button);
-        } else if (filter == "gameObject") {
-            return this.objects.filter(obj => obj instanceof gameObject);
-        }
-        return this.objects;
-    }
-    
-    getObjectById(id) {
-        return this.objects.find(obj => obj && obj.id == id);
-    }
-    
-    addUIPlane(uiPlane) {
-        if (uiPlane && !this.uiPlanes.includes(uiPlane)) {
-            this.uiPlanes.push(uiPlane);
-            if (typeof uiPlane.addToScene == "function") {
-                uiPlane.addToScene(this.id);
-            }
-        }
-        return this;
-    }
-    
-    removeUIPlane(uiPlane) {
-        this.uiPlanes = this.uiPlanes.filter(ui => ui != uiPlane);
-        if (uiPlane && typeof uiPlane.removeFromScene == "function") {
-            uiPlane.removeFromScene(this.id);
-        }
-        return this;
-    }
-    
-    clearUIPlanes() {
-        this.uiPlanes.forEach(ui => {
-            if (ui && typeof ui.removeFromScene == "function") {
-                ui.removeFromScene(this.id);
-            }
-        });
-        this.uiPlanes = [];
-        return this;
-    }
-    
-    addScript(script) {
-        if (typeof script == "function" && !this.scripts.includes(script)) {
-            this.scripts.push(script);
-        }
-        return this;
-    }
-    
-    removeScript(script) {
-        this.scripts = this.scripts.filter(s => s != script);
-        return this;
-    }
-    
-    clearScripts() {
-        this.scripts = [];
-        return this;
-    }
-    
-    onActivate(callback) {
-        if (typeof callback == "function") {
-            this.onActivateCallbacks.push(callback);
-        }
-        return this;
-    }
-    
-    onDeactivate(callback) {
-        if (typeof callback == "function") {
-            this.onDeactivateCallbacks.push(callback);
-        }
-        return this;
-    }
-    
-    onUpdate(callback) {
-        if (typeof callback == "function") {
-            this.onUpdateCallbacks.push(callback);
-        }
-        return this;
-    }
-    
-    pause() {
-        this.paused = true;
-        return this;
-    }
-    
-    resume() {
-        this.paused = false;
-        return this;
-    }
-    
-    setTransition(type, duration = 1.0) {
-        this.transition = {
-            type: type,
-            duration: duration,
-            progress: 0,
-            active: true
-        };
-        return this;
-    }
-    
-    addTag(tag) {
-        if (!this.tags.includes(tag)) {
-            this.tags.push(tag);
-        }
-        return this;
-    }
-    
-    removeTag(tag) {
-        this.tags = this.tags.filter(t => t != tag);
-        return this;
-    }
-    
-    hasTag(tag) {
-        return this.tags.includes(tag);
-    }
-    
-    reset() {
-        this.clearObjects();
-        this.clearUIPlanes();
-        this.clearScripts();
-        this.onActivateCallbacks = [];
-        this.onDeactivateCallbacks = [];
-        this.onUpdateCallbacks = [];
-        this.tags = [];
-        this.paused = false;
-        this.transition = null;
-        this.timeActive = 0;
-        return this;
-    }
-    
-    destroy() {
-        let index = MALCScene.indexOf(this);
-        if (index > -1) {
-            MALCScene.splice(index, 1);
-        }
-        
-        this.clearObjects();
-        this.clearUIPlanes();
-        
-        if (Scene.activeScene == this.id) {
-            Scene.activeScene = "blank";
-        }
-    }
-    
-    clone(newId) {
-        let clone = new Scene(newId || this.id + "_copy", this.backColor, ...this.scripts);
-        clone.objects = [...this.objects];
-        clone.uiPlanes = [...this.uiPlanes];
-        clone.tags = [...this.tags];
-        return clone;
-    }
-    
-    getInfo() {
-        return {
-            id: this.id,
-            active: this.active,
-            timeActive: this.timeActive,
-            objectCount: this.objects.length,
-            uiPlaneCount: this.uiPlanes.length,
-            scriptCount: this.scripts.length,
-            tags: this.tags,
-            paused: this.paused
-        };
     }
 }
 
@@ -1351,20 +1354,20 @@ class UIPlane {
     }
     
     render() {
-        push();
+        _p5.prototype.push();
         
         this.applyOrientation();
         this.applyTextFormatting();
         
         if (this.formatting.objectScale !== 1) {
-            scale(this.formatting.objectScale);
+            _p5.prototype.scale(this.formatting.objectScale);
         }
         
         if (typeof this.executable == "function") {
             this.executable(this);
         }
         
-        pop();
+        _p5.prototype.pop();
     }
     
     applyOrientation() {
@@ -1378,21 +1381,21 @@ class UIPlane {
                 } else {
                     cameraPos = [window.camera.x || 0, window.camera.y || 0];
                 }
-                translate(cameraPos[0] + offsetX, cameraPos[1] + offsetY);
+                _p5.prototype.translate(cameraPos[0] + offsetX, cameraPos[1] + offsetY);
             } else {
-                translate(offsetX, offsetY);
+                _p5.prototype.translate(offsetX, offsetY);
             }
         } else if (mode.toLowerCase() == "screen") {
-            translate(offsetX, offsetY);
+            _p5.prototype.translate(offsetX, offsetY);
         } else if (mode.includes(",")) {
             try {
                 let coords = mode.split(",").map(Number);
                 if (coords.length >= 2) {
                     if (window.camera && typeof window.camera.worldToScreen == "function") {
                         let screenPos = window.camera.worldToScreen(coords[0], coords[1]);
-                        translate(screenPos.x + offsetX, screenPos.y + offsetY);
+                        _p5.prototype.translate(screenPos.x + offsetX, screenPos.y + offsetY);
                     } else {
-                        translate(coords[0] + offsetX, coords[1] + offsetY);
+                        _p5.prototype.translate(coords[0] + offsetX, coords[1] + offsetY);
                     }
                 }
             } catch (e) {
@@ -1402,46 +1405,46 @@ class UIPlane {
     }
     
     applyTextFormatting() {
-        textSize(this.formatting.txt.base);
-        fill(this.formatting.txt.color);
-        textAlign(LEFT, TOP);
+        _p5.prototype.textSize(this.formatting.txt.base);
+        _p5.prototype.fill(this.formatting.txt.color);
+        _p5.prototype.textAlign(_p5.prototype.LEFT, _p5.prototype.TOP);
     }
     
     drawText(str, x, y, hAlign = LEFT, vAlign = TOP) {
-        push();
+        _p5.prototype.push();
         
         if (str.startsWith("[title]")) {
-            textSize(this.formatting.txt.title);
+            _p5.prototype.textSize(this.formatting.txt.title);
             str = str.replace("[title]", "");
         } else if (str.startsWith("[heading]")) {
-            textSize(this.formatting.txt.heading);
+            _p5.prototype.textSize(this.formatting.txt.heading);
             str = str.replace("[heading]", "");
         } else if (str.startsWith("[subtitle]")) {
-            textSize(this.formatting.txt.subtitle);
+            _p5.prototype.textSize(this.formatting.txt.subtitle);
             str = str.replace("[subtitle]", "");
         } else {
-            textSize(this.formatting.txt.base);
+            _p5.prototype.textSize(this.formatting.txt.base);
         }
         
-        fill(this.formatting.txt.color);
-        textAlign(hAlign, vAlign);
-        text(str, x, y);
+        _p5.prototype.fill(this.formatting.txt.color);
+        _p5.prototype.textAlign(hAlign, vAlign);
+        _p5.prototype.text(str, x, y);
         
-        pop();
+        _p5.prototype.pop();
     }
     
     drawButton(button, x, y) {
-        push();
+        _p5.prototype.push();
         
         if (this.formatting.objectScale !== 1) {
-            scale(this.formatting.objectScale);
+            _p5.prototype.scale(this.formatting.objectScale);
         }
         
         if (button && typeof button.render == "function") {
             button.render();
         }
         
-        pop();
+        _p5.prototype.pop();
     }
     
     belongsToScene(sceneId) {
@@ -1591,7 +1594,7 @@ class Camera {
         }
         
         let [translateX, translateY] = this.getOrientation();
-        translate(-translateX, -translateY);
+        _p5.prototype.translate(-translateX, -translateY);
     }
     
     unlink() {
@@ -2130,14 +2133,14 @@ class GameController {
           back: null,
           primary: null,
           secondary: null,
-          leftbumber: null,      // Fixed: changed from leftBumber
-          rightbumber: null,      // Fixed: changed from rightBumber
-          lefttrigger: null,      // Fixed: changed from leftTrigger
-          righttrigger: null,     // Fixed: changed from rightTrigger
+          leftbumber: null,
+          rightbumber: null,
+          lefttrigger: null,
+          righttrigger: null,
           view: null,
           menu: null,
-          leftstick: null,        // Fixed: changed from leftStick
-          rightstick: null,       // Fixed: changed from rightStick
+          leftstick: null,
+          rightstick: null,
           up: null,
           down: null,
           left: null,
@@ -2366,7 +2369,7 @@ const helpDocs = {
     // Game Engine Overview
     overview: `
         MALC Game Engine - A comprehensive 2D game engine for p5.js
-        Version: 1.0.0
+        Version: 1.0.1
         
         Core Features:
         - Scene management system
@@ -2520,8 +2523,8 @@ const helpDocs = {
                 isButtonPressed: "Check button by index",
                 getButtonValue: "Get analog button value"
             },
-            buttonNames: ["select", "back", "primary", "secondary", "leftBumber", "rightBumber", 
-                         "leftTrigger", "rightTrigger", "view", "menu", "leftStick", "rightStick",
+            buttonNames: ["select", "back", "primary", "secondary", "leftbumber", "rightbumber", 
+                         "lefttrigger", "righttrigger", "view", "menu", "leftstick", "rightstick",
                          "up", "down", "left", "right", "home"]
         }
     },
@@ -2542,10 +2545,10 @@ const helpDocs = {
         }
         
         // 2. Create a scene
-        let gameScene = new Scene("game", 220);
+        let gameScene = new MALC.Scene("game", 220);
         
         // 3. Create a game object with gravity
-        let player = new gameObject(100, 100, 50, 50, "game")
+        let player = new MALC.gameObject(100, 100, 50, 50, "game")
             .enableGravity()
             .setGravity({ mass: 1, bounce: 0.3 });
         
@@ -2558,7 +2561,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.0",
+    version: "1.0.1",
     
     // Core classes
     gameObject: gameObject,
@@ -2675,7 +2678,7 @@ const MALC = {
     
     // Initialize the engine
     init: function(canvasX, canvasY) {
-        createCanvas(canvasX, canvasY);
+        _p5.prototype.createCanvas(canvasX, canvasY);
         
         this.time = new Date();
         this.startTime = this.time.getTime();
@@ -2693,7 +2696,7 @@ const MALC = {
         // Create default scenes
         new Scene("blank", 70);
         new Scene("loading", 50, function(self) {
-            textSize(24);
+            _p5.prototype.textSize(24);
             let timed = (self.timeActive / 250 % 4);
             let dots = "";
             
@@ -2701,11 +2704,11 @@ const MALC = {
             else if (timed < 2) dots = "..";
             else if (timed < 3) dots = "...";
             
-            coloredText(`\\lime|Loading Game${dots}| `, 120, 200, LEFT, CENTER);
-            textSize(16);
+            _p5.prototype.coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
+            _p5.prototype.textSize(16);
             
             let num = (Math.floor(self.timeActive / 100) / 10);
-            coloredText(`\\red|${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}|`, 200, 225, CENTER, CENTER);
+            _p5.prototype.coloredText(`\\red|${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
         });
         
         Scene.activeScene = "loading";
@@ -2720,11 +2723,11 @@ const MALC = {
         this.timer = this.time - this.startTime;
         
         if (this.mouse) {
-            this.mouse.rawX = mouseX;
-            this.mouse.rawY = mouseY;
-            this.mouse.x = this.mouse.rawX + camera.getOrientation()[0];
-            this.mouse.y = this.mouse.rawY + camera.getOrientation()[1];
-            this.mouse.down = mouseIsPressed;
+            this.mouse.rawX = _p5.prototype.mouseX;
+            this.mouse.rawY = _p5.prototype.mouseY;
+            this.mouse.x = this.mouse.rawX + window.camera.getOrientation()[0];
+            this.mouse.y = this.mouse.rawY + window.camera.getOrientation()[1];
+            this.mouse.down = _p5.prototype.mouseIsPressed;
         }
         
         controller.update();
@@ -2734,8 +2737,8 @@ const MALC = {
         
         this.fps = fps;
         
-        if (typeof camera.render == "function") {
-            camera.render();
+        if (typeof window.camera.render == "function") {
+            window.camera.render();
         }
         Scene.update();
     }
@@ -2747,4 +2750,3 @@ MALC.mouse = new MouseHandler();
 return MALC;
 
 }));
-
