@@ -1,6 +1,6 @@
 /**
  * MALC Game Engine Library
- * Version: 1.0.2
+ * Version: 1.0.3
  * Description: A comprehensive 2D game engine for p5.js
  */
 
@@ -38,6 +38,91 @@ function getTimestamp() {
 
 function generateId(prefix) {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// ========== COLORED TEXT FUNCTIONS (SAFE VERSION) ==========
+function parseColoredLine(str) {
+    const regex = /\\([^|\\\n]+)\|([^|]+)\|/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = regex.exec(str)) !== null) {
+        if (match.index > lastIndex) {
+            parts.push({
+                text: str.substring(lastIndex, match.index),
+                color: null
+            });
+        }
+        
+        parts.push({
+            text: match[2],
+            color: match[1]
+        });
+        
+        lastIndex = match.index + match[0].length;
+    }
+    
+    if (lastIndex < str.length) {
+        parts.push({
+            text: str.substring(lastIndex),
+            color: null
+        });
+    }
+    
+    return parts.length ? parts : [{ text: str, color: null }];
+}
+
+function parseColoredText(str) {
+    const lines = str.split('\n');
+    const result = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const parts = parseColoredLine(line);
+        
+        result.push(...parts);
+        
+        if (i < lines.length - 1) {
+            result.push({
+                text: '\n',
+                color: null,
+                isNewline: true
+            });
+        }
+    }
+    
+    return result;
+}
+
+function renderColoredText(p, str, x, y, horizontal, vertical, maxWidth) {
+    const parts = parseColoredText(str);
+    let currentX = x;
+    let currentY = y;
+    
+    p.push();
+    p.textAlign(horizontal, vertical);
+    
+    for (const part of parts) {
+        if (part.isNewline) {
+            currentX = x;
+            currentY += p.textLeading() || p.textSize() * 1.2;
+            continue;
+        }
+        
+        if (part.color) {
+            try {
+                p.fill(part.color);
+            } catch (e) {
+                p.fill(255);
+            }
+        }
+        
+        p.text(part.text, currentX, currentY, maxWidth);
+        currentX += p.textWidth(part.text);
+    }
+    
+    p.pop();
 }
 
 // ========== SCENE CLASS (DEFINED FIRST) ==========
@@ -84,8 +169,8 @@ class Scene {
                 });
                 
                 _p5.prototype.push();
-                if (window.camera && typeof camera.render == 'function') {
-                    camera.render();
+                if (window.camera && typeof window.camera.render == 'function') {
+                    window.camera.render();
                 }
                 
                 S.render();
@@ -913,8 +998,8 @@ class gameObject {
     }
 
     screenToWorld(screenX, screenY) {
-        if (window.camera && typeof camera.screenToWorld == "function") {
-            return camera.screenToWorld(screenX, screenY);
+        if (window.camera && typeof window.camera.screenToWorld == "function") {
+            return window.camera.screenToWorld(screenX, screenY);
         }
         return { x: screenX, y: screenY };
     }
@@ -922,9 +1007,9 @@ class gameObject {
     isOnScreen() {
         if (!window.camera) return true;
         
-        let cameraPos = camera.getOrientation();
-        let screenRight = cameraPos[0] + camera.width;
-        let screenBottom = cameraPos[1] + camera.height;
+        let cameraPos = window.camera.getOrientation();
+        let screenRight = cameraPos[0] + window.camera.width;
+        let screenBottom = cameraPos[1] + window.camera.height;
         
         return (this.x + this.width/2 > cameraPos[0] &&
                 this.x - this.width/2 < screenRight &&
@@ -1077,7 +1162,14 @@ class Button extends gameObject {
         _p5.prototype.textStyle(btnFormat.text.style);
         _p5.prototype.textSize(btnFormat.text.size);
         _p5.prototype.fill(btnFormat.text.color);
-        _p5.prototype.coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
+        
+        // Use colored text if available, otherwise use normal text
+        if (_p5.prototype.coloredText) {
+            _p5.prototype.coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
+        } else {
+            _p5.prototype.text(btnFormat.text.display, 0, 0);
+        }
+        
         _p5.prototype.pop();
         
         this.formatting.color = originalColor;
@@ -2265,100 +2357,6 @@ function refreshLoop() {
     });
 }
 
-// ========== COLORED TEXT FUNCTION ==========
-p5.prototype._parseColoredText = function(str) {
-    const lines = str.split('\n');
-    const result = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const parts = this._parseColoredLine(line);
-        
-        result.push(...parts);
-        
-        if (i < lines.length - 1) {
-            result.push({
-                text: '\n',
-                color: null,
-                isNewline: true
-            });
-        }
-    }
-    
-    return result;
-};
-
-p5.prototype._parseColoredLine = function(str) {
-    const regex = /\\([^|\\\n]+)\|([^|]+)\|/g;
-    const parts = [];
-    let lastIndex = 0;
-    let match;
-    
-    while ((match = regex.exec(str)) !== null) {
-        if (match.index > lastIndex) {
-            parts.push({
-                text: str.substring(lastIndex, match.index),
-                color: null
-            });
-        }
-        
-        parts.push({
-            text: match[2],
-            color: match[1]
-        });
-        
-        lastIndex = match.index + match[0].length;
-    }
-    
-    if (lastIndex < str.length) {
-        parts.push({
-            text: str.substring(lastIndex),
-            color: null
-        });
-    }
-    
-    return parts.length ? parts : [{ text: str, color: null }];
-};
-
-p5.prototype.coloredText = function(str, x, y, horizontal = LEFT, vertical = BASELINE, maxWidth) {
-    const parts = this._parseColoredText(str);
-    let currentX = x;
-    let currentY = y;
-    
-    const originalFill = this.drawingContext.fillStyle;
-    const originalAlign = this.drawingContext.textAlign;
-    const originalBaseline = this.drawingContext.textBaseline;
-    
-    this.textAlign(horizontal, vertical);
-    
-    for (const part of parts) {
-        if (part.isNewline) {
-            currentX = x;
-            currentY += this.textLeading() || this.textSize() * 1.2;
-            continue;
-        }
-        
-        if (part.color) {
-            try {
-                this.fill(part.color);
-            } catch (e) {
-                this.fill(originalFill);
-            }
-        }
-        
-        this.text(part.text, currentX, currentY, maxWidth);
-        currentX += this.textWidth(part.text);
-    }
-    
-    this.fill(originalFill);
-    if (originalAlign && originalBaseline) {
-        this.drawingContext.textAlign = originalAlign;
-        this.drawingContext.textBaseline = originalBaseline;
-    }
-    
-    return this;
-};
-
 // ========== FPS ACCESSOR ==========
 function getFPS() {
     return fps;
@@ -2369,7 +2367,7 @@ const helpDocs = {
     // Game Engine Overview
     overview: `
         MALC Game Engine - A comprehensive 2D game engine for p5.js
-        Version: 1.0.1
+        Version: 1.0.3
         
         Core Features:
         - Scene management system
@@ -2561,7 +2559,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.1",
+    version: "1.0.3",
     
     // Core classes
     gameObject: gameObject,
@@ -2690,25 +2688,49 @@ const MALC = {
         this.mouse = new MouseHandler();
         window.mouse = this.mouse;
         
+        // Add coloredText method to p5 instance safely
+        if (!_p5.prototype.coloredText) {
+            _p5.prototype.coloredText = function(str, x, y, horizontal, vertical, maxWidth) {
+                renderColoredText(this, str, x, y, horizontal || LEFT, vertical || BASELINE, maxWidth);
+                return this;
+            };
+        }
+        
         // Start FPS tracking
         refreshLoop();
         
         // Create default scenes
         new Scene("blank", 70);
         new Scene("loading", 50, function(self) {
-            _p5.prototype.textSize(24);
-            let timed = (self.timeActive / 250 % 4);
-            let dots = "";
-            
-            if (timed < 1) dots = ".";
-            else if (timed < 2) dots = "..";
-            else if (timed < 3) dots = "...";
-            
-            _p5.prototype.coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
-            _p5.prototype.textSize(16);
-            
-            let num = (Math.floor(self.timeActive / 100) / 10);
-            _p5.prototype.coloredText(`\\red|${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
+            try {
+                _p5.prototype.textSize(24);
+                let timed = (self.timeActive / 250 % 4);
+                let dots = "";
+                
+                if (timed < 1) dots = ".";
+                else if (timed < 2) dots = "..";
+                else if (timed < 3) dots = "...";
+                
+                if (_p5.prototype.coloredText) {
+                    _p5.prototype.coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
+                } else {
+                    _p5.prototype.text(`Loading Game${dots}`, 120, 200);
+                }
+                
+                _p5.prototype.textSize(16);
+                
+                let num = (Math.floor(self.timeActive / 100) / 10);
+                let percentText = `${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}`;
+                
+                if (_p5.prototype.coloredText) {
+                    _p5.prototype.coloredText(`\\red|${percentText}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
+                } else {
+                    _p5.prototype.text(percentText, 200, 225);
+                }
+            } catch (e) {
+                // Fallback if coloredText fails
+                _p5.prototype.text(`Loading Game...`, 120, 200);
+            }
         });
         
         Scene.activeScene = "loading";
