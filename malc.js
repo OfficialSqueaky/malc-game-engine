@@ -1,6 +1,6 @@
 /**
  * MALC Game Engine Library
- * Version: 1.0.6
+ * Version: 1.0.7
  * Description: A comprehensive 2D game engine for p5.js
  */
 
@@ -2575,7 +2575,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.6", // Increment version
+    version: "1.0.7", // Increment version
     
     // Core classes
     gameObject: gameObject,
@@ -2821,6 +2821,7 @@ MALC.mouse = new MouseHandler();
 return MALC;
 
 }));
+
 
 
 
