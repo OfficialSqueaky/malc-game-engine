@@ -1,6 +1,6 @@
 /**
  * MALC Game Engine Library
- * Version: 1.0.3
+ * Version: 1.0.5
  * Description: A comprehensive 2D game engine for p5.js
  */
 
@@ -2557,7 +2557,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.4", // Increment version
+    version: "1.0.5", // Increment version
     
     // Core classes
     gameObject: gameObject,
@@ -2674,8 +2674,10 @@ const MALC = {
     },
     
     // Initialize the engine
+    
     init: function(canvasX, canvasY) {
-        _p5.prototype.createCanvas(canvasX, canvasY);
+        // Use the current p5 instance (this) to create the canvas
+        this.createCanvas(canvasX, canvasY);
         
         this.time = new Date();
         this.startTime = this.time.getTime();
@@ -2687,57 +2689,51 @@ const MALC = {
         this.mouse = new MouseHandler();
         window.mouse = this.mouse;
         
-        
-        
         // Start FPS tracking
         refreshLoop();
         
         // Create default scenes
-        // Create default scenes
-new Scene("blank", 70);
-new Scene("loading", 50, function(self) {
-    try {
-        _p5.prototype.textSize(24);
-        let timed = (self.timeActive / 250 % 4);
-        let dots = "";
-        
-        if (timed < 1) dots = ".";
-        else if (timed < 2) dots = "..";
-        else if (timed < 3) dots = "...";
-        
-        // Use standalone coloredText function
-        coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
-        
-        _p5.prototype.textSize(16);
-        
-        let num = (Math.floor(self.timeActive / 100) / 10);
-        let percentText = `${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}`;
-        
-        // Use standalone coloredText function
-        coloredText(`\\red|${percentText}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
-    } catch (e) {
-        // Fallback if coloredText fails
-        _p5.prototype.text(`Loading Game...`, 120, 200);
-    }
-});
+        new Scene("blank", 70);
+        new Scene("loading", 50, function(self) {
+            try {
+                this.textSize(24);
+                let timed = (self.timeActive / 250 % 4);
+                let dots = "";
+                
+                if (timed < 1) dots = ".";
+                else if (timed < 2) dots = "..";
+                else if (timed < 3) dots = "...";
+                
+                coloredText(`\\lime|Loading Game${dots}| `, 120, 200, this.LEFT, this.CENTER);
+                
+                this.textSize(16);
+                
+                let num = (Math.floor(self.timeActive / 100) / 10);
+                let percentText = `${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}`;
+                
+                coloredText(`\\red|${percentText}|`, 200, 225, this.CENTER, this.CENTER);
+            } catch (e) {
+                this.text(`Loading Game...`, 120, 200);
+            }
+        });
         
         Scene.activeScene = "loading";
         
         console.log("MALC Game Engine initialized v" + this.version);
         console.log("Type MALC.help() for documentation");
     },
-    
-    // Update all systems (call in draw)
-    update: function() {
+        
+        // Update all systems (call in draw)
+        update: function() {
         this.time = new Date();
         this.timer = this.time - this.startTime;
         
         if (this.mouse) {
-            this.mouse.rawX = _p5.prototype.mouseX;
-            this.mouse.rawY = _p5.prototype.mouseY;
+            this.mouse.rawX = this.mouseX;
+            this.mouse.rawY = this.mouseY;
             this.mouse.x = this.mouse.rawX + window.camera.getOrientation()[0];
             this.mouse.y = this.mouse.rawY + window.camera.getOrientation()[1];
-            this.mouse.down = _p5.prototype.mouseIsPressed;
+            this.mouse.down = this.mouseIsPressed;
         }
         
         controller.update();
@@ -2760,4 +2756,5 @@ MALC.mouse = new MouseHandler();
 return MALC;
 
 }));
+
 
