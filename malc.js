@@ -1,6 +1,6 @@
 /**
  * MALC Game Engine Library
- * Version: 1.0.5
+ * Version: 1.0.6
  * Description: A comprehensive 2D game engine for p5.js
  */
 
@@ -909,7 +909,20 @@ class gameObject {
     directionTo(x, y, err = 0.5) {
         let pa = [x - this.x, y - this.y];
         
-        let angle = (x && y) ? _p5.prototype.atan(pa[1]/pa[0]) : this.rotation;
+        let angle = this.rotation;
+        
+        // Safely calculate angle
+        try {
+            if (x && y) {
+                angle = _p5.prototype.atan(pa[1]/pa[0]);
+            }
+        } catch (e) {
+            // Fallback to native Math.atan
+            if (x && y) {
+                angle = Math.atan(pa[1]/pa[0]);
+            }
+        }
+        
         var quads = [
             pa[0] < -err && pa[1] > err,
             pa[0] < -err && pa[1] < -err,
@@ -919,7 +932,12 @@ class gameObject {
             (pa[1] < err && pa[1] > -err),
         ];
         
-        let da = (_p5.prototype.atan(pa[1]/pa[0]) * 180)/Math.PI;
+        let da = 0;
+        try {
+            da = (_p5.prototype.atan(pa[1]/pa[0]) * 180)/Math.PI;
+        } catch (e) {
+            da = (Math.atan(pa[1]/pa[0]) * 180)/Math.PI;
+        }
         
         if((pa[1] > -err && pa[1] < err) && (pa[0] > -err && pa[0] < err)){
             angle = NaN;
@@ -2557,7 +2575,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.5", // Increment version
+    version: "1.0.6", // Increment version
     
     // Core classes
     gameObject: gameObject,
@@ -2675,9 +2693,10 @@ const MALC = {
     
     // Initialize the engine
     
+    // Initialize the engine
     init: function(canvasX, canvasY) {
-        // Use the current p5 instance (this) to create the canvas
-        this.createCanvas(canvasX, canvasY);
+        // Use the p5 instance that was passed to the factory function
+        _p5.prototype.createCanvas(canvasX, canvasY);
         
         this.time = new Date();
         this.startTime = this.time.getTime();
@@ -2696,7 +2715,8 @@ const MALC = {
         new Scene("blank", 70);
         new Scene("loading", 50, function(self) {
             try {
-                this.textSize(24);
+                // Use _p5.prototype here too
+                _p5.prototype.textSize(24);
                 let timed = (self.timeActive / 250 % 4);
                 let dots = "";
                 
@@ -2704,16 +2724,16 @@ const MALC = {
                 else if (timed < 2) dots = "..";
                 else if (timed < 3) dots = "...";
                 
-                coloredText(`\\lime|Loading Game${dots}| `, 120, 200, this.LEFT, this.CENTER);
+                coloredText(`\\lime|Loading Game${dots}| `, 120, 200, _p5.prototype.LEFT, _p5.prototype.CENTER);
                 
-                this.textSize(16);
+                _p5.prototype.textSize(16);
                 
                 let num = (Math.floor(self.timeActive / 100) / 10);
                 let percentText = `${ Math.round((10 - num) * 10) / 10 + ((num + "").length < 2 ? ".0" : "")}`;
                 
-                coloredText(`\\red|${percentText}|`, 200, 225, this.CENTER, this.CENTER);
+                coloredText(`\\red|${percentText}|`, 200, 225, _p5.prototype.CENTER, _p5.prototype.CENTER);
             } catch (e) {
-                this.text(`Loading Game...`, 120, 200);
+                _p5.prototype.text(`Loading Game...`, 120, 200);
             }
         });
         
@@ -2724,30 +2744,75 @@ const MALC = {
     },
         
         // Update all systems (call in draw)
-        update: function() {
-        this.time = new Date();
-        this.timer = this.time - this.startTime;
+        update() {
+            if (!this.active) return;
+            
+            // Apply gravity if enabled
+            this.applyGravity();
+            
+            let vel = this.velocity[0];
+            let angle = this.velocity[1];
+            
+            if (this.velocityMode == "polar") {
+                let linked = false;
+                if (!/unlinked/i.test(this.rvm) && /linked/i.test(this.rvm)) {
+                    this.velocity[1] = this.rotation;
+                    linked = true;
+                }
         
-        if (this.mouse) {
-            this.mouse.rawX = this.mouseX;
-            this.mouse.rawY = this.mouseY;
-            this.mouse.x = this.mouse.rawX + window.camera.getOrientation()[0];
-            this.mouse.y = this.mouse.rawY + window.camera.getOrientation()[1];
-            this.mouse.down = this.mouseIsPressed;
+                let rot = linked ? 
+                    (this.rotationMode == "degrees" ? (this.rotation) : this._toRadians(this.rotation)) : 
+                    (this.rotationMode == "degrees" ? (this.velocity[1]) : (this.velocity[1]));
+                
+                if(isNaN(rot)){
+                    vel = 0;
+                    rot = 0;
+                }
+                
+                // SAFELY call p5 math functions
+                let vx = 0;
+                let vy = 0;
+                
+                try {
+                    vx = vel * _p5.prototype.cos(rot);
+                    vy = vel * _p5.prototype.sin(rot);
+                } catch (e) {
+                    // Fallback if p5 isn't ready
+                    vx = vel * Math.cos(rot);
+                    vy = vel * Math.sin(rot);
+                }
+        
+                this.velocityMatrix = [vx, vy];
+                
+                // Don't apply horizontal movement if gravity is enabled and we're grounded with friction
+                if (!(this.gravity.enabled && this.gravity.grounded && this.gravity.friction > 0)) {
+                    this.x += vx;
+                }
+                
+                // Vertical movement is handled by gravity when enabled
+                if (!this.gravity.enabled) {
+                    this.y += vy;
+                }
+            } else {
+                // Cartesian velocity mode
+                if (!(this.gravity.enabled && this.gravity.grounded && this.gravity.friction > 0)) {
+                    this.x += vel;
+                }
+                if (!this.gravity.enabled) {
+                    this.y += angle;
+                }
+            }
+            
+            // Update parent scene reference
+            this.updateParentScene();
+            
+            MALCgameObjects[this.objectInstance] = this;
         }
         
-        controller.update();
-        
-        gameObject.update();
-        Button.updateButton();
-        
-        this.fps = fps;
-        
-        if (typeof window.camera.render == "function") {
-            window.camera.render();
+        // Helper method for radians conversion without p5
+        _toRadians(degrees) {
+            return degrees * Math.PI / 180;
         }
-        Scene.update();
-    }
 };
 
 // Initialize mouse and keyboard handlers
@@ -2756,5 +2821,6 @@ MALC.mouse = new MouseHandler();
 return MALC;
 
 }));
+
 
 
