@@ -1,6 +1,6 @@
 /**
  * MALC Game Engine Library
- * Version: 1.0.7
+ * Version: 1.0.8
  * Description: A comprehensive 2D game engine for p5.js
  */
 
@@ -2575,7 +2575,7 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.7", // Increment version
+    version: "1.0.8", // Increment version
     
     // Core classes
     gameObject: gameObject,
@@ -2601,7 +2601,7 @@ const MALC = {
     // Utility functions
     generateId: generateId,
     getTimestamp: getTimestamp,
-    coloredText: coloredText, // Add this line
+    coloredText: coloredText,
     
     // Gravity constants
     GRAVITY: GRAVITY,
@@ -2692,8 +2692,6 @@ const MALC = {
     },
     
     // Initialize the engine
-    
-    // Initialize the engine
     init: function(canvasX, canvasY) {
         // Use the p5 instance that was passed to the factory function
         _p5.prototype.createCanvas(canvasX, canvasY);
@@ -2742,77 +2740,33 @@ const MALC = {
         console.log("MALC Game Engine initialized v" + this.version);
         console.log("Type MALC.help() for documentation");
     },
+    
+    // Update all systems (call in draw)
+    update: function() {
+        // This was incorrectly placed in your file - it belongs in the MALC object
+        this.time = new Date();
+        this.timer = this.time - this.startTime;
         
-        // Update all systems (call in draw)
-        update() {
-            if (!this.active) return;
-            
-            // Apply gravity if enabled
-            this.applyGravity();
-            
-            let vel = this.velocity[0];
-            let angle = this.velocity[1];
-            
-            if (this.velocityMode == "polar") {
-                let linked = false;
-                if (!/unlinked/i.test(this.rvm) && /linked/i.test(this.rvm)) {
-                    this.velocity[1] = this.rotation;
-                    linked = true;
-                }
-        
-                let rot = linked ? 
-                    (this.rotationMode == "degrees" ? (this.rotation) : this._toRadians(this.rotation)) : 
-                    (this.rotationMode == "degrees" ? (this.velocity[1]) : (this.velocity[1]));
-                
-                if(isNaN(rot)){
-                    vel = 0;
-                    rot = 0;
-                }
-                
-                // SAFELY call p5 math functions
-                let vx = 0;
-                let vy = 0;
-                
-                try {
-                    vx = vel * _p5.prototype.cos(rot);
-                    vy = vel * _p5.prototype.sin(rot);
-                } catch (e) {
-                    // Fallback if p5 isn't ready
-                    vx = vel * Math.cos(rot);
-                    vy = vel * Math.sin(rot);
-                }
-        
-                this.velocityMatrix = [vx, vy];
-                
-                // Don't apply horizontal movement if gravity is enabled and we're grounded with friction
-                if (!(this.gravity.enabled && this.gravity.grounded && this.gravity.friction > 0)) {
-                    this.x += vx;
-                }
-                
-                // Vertical movement is handled by gravity when enabled
-                if (!this.gravity.enabled) {
-                    this.y += vy;
-                }
-            } else {
-                // Cartesian velocity mode
-                if (!(this.gravity.enabled && this.gravity.grounded && this.gravity.friction > 0)) {
-                    this.x += vel;
-                }
-                if (!this.gravity.enabled) {
-                    this.y += angle;
-                }
-            }
-            
-            // Update parent scene reference
-            this.updateParentScene();
-            
-            MALCgameObjects[this.objectInstance] = this;
+        if (this.mouse) {
+            this.mouse.rawX = _p5.prototype.mouseX;
+            this.mouse.rawY = _p5.prototype.mouseY;
+            this.mouse.x = this.mouse.rawX + window.camera.getOrientation()[0];
+            this.mouse.y = this.mouse.rawY + window.camera.getOrientation()[1];
+            this.mouse.down = _p5.prototype.mouseIsPressed;
         }
         
-        // Helper method for radians conversion without p5
-        _toRadians(degrees) {
-            return degrees * Math.PI / 180;
+        controller.update();
+        
+        gameObject.update();
+        Button.updateButton();
+        
+        this.fps = fps;
+        
+        if (typeof window.camera.render == "function") {
+            window.camera.render();
         }
+        Scene.update();
+    }
 };
 
 // Initialize mouse and keyboard handlers
@@ -2821,7 +2775,3 @@ MALC.mouse = new MouseHandler();
 return MALC;
 
 }));
-
-
-
-
