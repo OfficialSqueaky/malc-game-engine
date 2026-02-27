@@ -2126,24 +2126,24 @@ class GameController {
         this.id = "";
         
         this.binds = {
-            select: null,
-            back: null,
-            primary: null,
-            secondary: null,
-            leftBumber: null,
-            rightBumber: null,
-            leftTrigger: null,
-            rightTrigger: null,
-            view: null,
-            menu: null,
-            leftStick: null,
-            rightStick: null,
-            up: null,
-            down: null,
-            left: null,
-            right: null,
-            home: null,
-        };
+          select: null,
+          back: null,
+          primary: null,
+          secondary: null,
+          leftbumber: null,      // Fixed: changed from leftBumber
+          rightbumber: null,      // Fixed: changed from rightBumber
+          lefttrigger: null,      // Fixed: changed from leftTrigger
+          righttrigger: null,     // Fixed: changed from rightTrigger
+          view: null,
+          menu: null,
+          leftstick: null,        // Fixed: changed from leftStick
+          rightstick: null,       // Fixed: changed from rightStick
+          up: null,
+          down: null,
+          left: null,
+          right: null,
+          home: null,
+      };
         
         this.setupListeners();
     }
@@ -2208,28 +2208,38 @@ class GameController {
 
     getButton(name){
         name = name.toLowerCase();
-        let btn = {
-            select: 0,
-            back: 1,
-            primary: 2,
-            secondary: 3,
-            lefttumber: 4,
-            righttumber: 5,
-            lefttrigger: 6,
-            righttrigger: 7,
-            view: 8,
-            menu: 9,
-            leftstick: 10,
-            rightstick: 11,
-            up: 12,
-            down: 13,
-            left: 14,
-            right: 15,
-            home: 16,
-        }[name];
-        
-        if(btn == undefined) throw new Error(`Controller|TypeError: "${name}" isn't a valid button mapping getter!`);
-        
+
+        // Handle common variations
+        const buttonMap = {
+            // Primary button names
+            'select': 0, 'back': 1, 'primary': 2, 'secondary': 3,
+            'home': 16,
+
+            // Bumpers (with common variations)
+            'leftbumper': 4, 'leftbumber': 4, 'lb': 4,
+            'rightbumper': 5, 'rightbumber': 5, 'rb': 5,
+
+            // Triggers
+            'lefttrigger': 6, 'lt': 6,
+            'righttrigger': 7, 'rt': 7,
+
+            // System buttons
+            'view': 8, 'menu': 9,
+
+            // Stick clicks
+            'leftstick': 10, 'l3': 10,
+            'rightstick': 11, 'r3': 11,
+
+            // D-Pad
+            'up': 12, 'down': 13, 'left': 14, 'right': 15
+        };
+
+        const btn = buttonMap[name];
+
+        if(btn == undefined) {
+            throw new Error(`Controller|TypeError: "${name}" isn't a valid button mapping getter!`);
+        }
+
         return this.buttons[btn]?.pressed || false;
     }
 }
