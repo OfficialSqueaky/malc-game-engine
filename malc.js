@@ -1,7 +1,7 @@
 /**
  * MALC Game Engine Library
- * Version: 1.0.8
- * Description: A comprehensive 2D game engine for p5.js
+ * Version: 1.1.0
+ * Description: A comprehensive 2D/3D game engine for p5.js
  */
 
 (function(root, factory) {
@@ -30,6 +30,10 @@ var buttonsToggled = true;
 // ========== GRAVITY CONSTANTS ==========
 const GRAVITY = 0.5;
 const TERMINAL_VELOCITY = 20;
+
+// ========== MODE CONSTANTS ==========
+const MODE_2D = "2D";
+const MODE_3D = "3D";
 
 // ========== HELPER FUNCTIONS ==========
 function getTimestamp() {
@@ -127,8 +131,30 @@ function parseColoredText(str) {
     return result;
 }
 
-// ========== SCENE CLASS (DEFINED FIRST) ==========
-class Scene {
+// ========== MODE-AWARE BASE CLASS ==========
+class ModeAware {
+    constructor() {
+        this.mode = MALC.mode;
+    }
+    
+    isMode2D() {
+        return this.mode === MODE_2D;
+    }
+    
+    isMode3D() {
+        return this.mode === MODE_3D;
+    }
+    
+    // Method to be overridden by subclasses for mode-specific behavior
+    initMode() {
+        if (this.isMode3D()) {
+            console.warn("3D mode features are not yet implemented in this version");
+        }
+    }
+}
+
+// ========== SCENE CLASS (MODE-AWARE) ==========
+class Scene extends ModeAware {
     static scenes = [];
     static activeScene = "blank";
     static started = false;
@@ -171,8 +197,10 @@ class Scene {
                 });
                 
                 _p5.prototype.push();
-                if (window.camera && typeof window.camera.render == 'function') {
-                    window.camera.render();
+                
+                // Camera rendering is now handled by the MALC camera object
+                if (MALC.camera && typeof MALC.camera.render == 'function') {
+                    MALC.camera.render();
                 }
                 
                 S.render();
@@ -232,6 +260,7 @@ class Scene {
     }
 
     constructor(id, backgroundColor, ...scripts) {
+        super();
         MALCScene.forEach(s => {
             if (s.id == id || typeof id != "string") {
                 throw new Error(`Scenes must have unique IDs and be strings. Duplicate/Invalid ID: "${id}"`);
@@ -530,8 +559,8 @@ class Scene {
     }
 }
 
-// ========== GAME OBJECT CLASS WITH GRAVITY ==========
-class gameObject {
+// ========== GAME OBJECT CLASS WITH GRAVITY (MODE-AWARE) ==========
+class gameObject extends ModeAware {
     static objects = [];
     static started = false;
     static gravity = GRAVITY;
@@ -589,15 +618,23 @@ class gameObject {
     }
 
     constructor(x = 0, y = 0, w = 20, h = 20, ...scenes) {
+        super();
         this.id = generateId('gameObject');
         this.x = x;
         this.y = y;
+        this.z = 0; // Z coordinate for 3D mode
         this.width = w;
         this.height = h;
+        this.depth = 20; // Depth for 3D mode
         this.rotation = 0;
+        this.rotationX = 0; // 3D rotation
+        this.rotationY = 0; // 3D rotation
+        this.rotationZ = 0; // 3D rotation
         this.rotationMode = "degrees";
         this.velocity = [0, 0];
+        this.velocity3D = [0, 0, 0]; // 3D velocity
         this.velocityMatrix = [0, 0];
+        this.velocityMatrix3D = [0, 0, 0]; // 3D velocity matrix
         this.velocityMode = "polar";
         this.rvm = "unlinked";
         
@@ -605,6 +642,7 @@ class gameObject {
         this.gravity = {
             enabled: false,
             velocity: 0,
+            velocity3D: [0, 0, 0], // 3D gravity velocity
             grounded: false,
             groundTolerance: 1, // pixels
             mass: 1,
@@ -629,8 +667,10 @@ class gameObject {
         this.hitbox = {
             x: 0,
             y: 0,
+            z: 0, // For 3D
             width: 0,
             height: 0,
+            depth: 0, // For 3D
             rotation: 0,
             parts: null,
             outline: 1,
@@ -640,6 +680,17 @@ class gameObject {
         this.lastGroundY = y;
         
         MALCgameObjects.push(this);
+    }
+    
+    // Mode-specific initialization
+    initMode() {
+        super.initMode();
+        if (this.isMode3D()) {
+            // Initialize 3D-specific properties
+            this.velocity3D = [0, 0, 0];
+            this.velocityMatrix3D = [0, 0, 0];
+            this.gravity.velocity3D = [0, 0, 0];
+        }
     }
     
     // Enable gravity for this object
@@ -652,6 +703,9 @@ class gameObject {
     disableGravity() {
         this.gravity.enabled = false;
         this.gravity.velocity = 0;
+        if (this.isMode3D()) {
+            this.gravity.velocity3D = [0, 0, 0];
+        }
         return this;
     }
     
@@ -665,8 +719,8 @@ class gameObject {
         return this;
     }
     
-    // Apply gravity to this object
-    applyGravity() {
+    // Apply gravity to this object (2D version)
+    applyGravity2D() {
         if (!this.gravity.enabled) return;
         
         // Apply gravity acceleration (scaled by mass)
@@ -675,14 +729,11 @@ class gameObject {
         // Limit to terminal velocity
         this.gravity.velocity = Math.min(this.gravity.velocity, gameObject.terminalVelocity);
         
-        // Store last position before moving
-        let lastY = this.y;
-        
         // Apply vertical movement
         this.y += this.gravity.velocity;
         
         // Check for ground collision with other objects
-        this.checkGroundCollision();
+        this.checkGroundCollision2D();
         
         // If we just landed, stop downward velocity
         if (this.gravity.grounded) {
@@ -696,8 +747,23 @@ class gameObject {
         }
     }
     
-    // Check if this object is standing on another object
-    checkGroundCollision() {
+    // Apply gravity to this object (3D version - placeholder for future)
+    applyGravity3D() {
+        // This will be implemented in future versions
+        console.warn("3D gravity not yet implemented");
+    }
+    
+    // Apply gravity based on current mode
+    applyGravity() {
+        if (this.isMode2D()) {
+            this.applyGravity2D();
+        } else {
+            this.applyGravity3D();
+        }
+    }
+    
+    // Check ground collision in 2D
+    checkGroundCollision2D() {
         if (!this.collition || !this.gravity.enabled) return;
         
         let wasGrounded = this.gravity.grounded;
@@ -740,9 +806,29 @@ class gameObject {
         }
     }
     
+    // Check ground collision in 3D (placeholder)
+    checkGroundCollision3D() {
+        // Will be implemented in future versions
+    }
+    
+    // Update based on current mode
     update() {
         if (!this.active) return;
         
+        if (this.isMode2D()) {
+            this.update2D();
+        } else {
+            this.update3D();
+        }
+        
+        // Update parent scene reference
+        this.updateParentScene();
+        
+        MALCgameObjects[this.objectInstance] = this;
+    }
+    
+    // 2D update logic
+    update2D() {
         // Apply gravity if enabled
         this.applyGravity();
         
@@ -757,7 +843,7 @@ class gameObject {
             }
 
             let rot = linked ? 
-                (this.rotationMode == "degrees" ? (this.rotation) : _p5.prototype.radians(this.rotation)) : 
+                (this.rotationMode == "degrees" ? (this.rotation) : this._toRadians(this.rotation)) : 
                 (this.rotationMode == "degrees" ? (this.velocity[1]) : (this.velocity[1]));
             
             if(isNaN(rot)){
@@ -765,8 +851,18 @@ class gameObject {
                 rot = 0;
             }
             
-            let vx = vel * _p5.prototype.cos(rot);
-            let vy = vel * _p5.prototype.sin(rot);
+            // Safely call p5 math functions
+            let vx = 0;
+            let vy = 0;
+            
+            try {
+                vx = vel * _p5.prototype.cos(rot);
+                vy = vel * _p5.prototype.sin(rot);
+            } catch (e) {
+                // Fallback if p5 isn't ready
+                vx = vel * Math.cos(rot);
+                vy = vel * Math.sin(rot);
+            }
 
             this.velocityMatrix = [vx, vy];
             
@@ -788,13 +884,14 @@ class gameObject {
                 this.y += angle;
             }
         }
-        
-        // Update parent scene reference
-        this.updateParentScene();
-        
-        MALCgameObjects[this.objectInstance] = this;
     }
     
+    // 3D update logic (placeholder)
+    update3D() {
+        console.warn("3D updates not yet implemented");
+    }
+    
+    // Render based on current mode
     render() {
         if (!this.active) return;
         
@@ -802,6 +899,15 @@ class gameObject {
             if(typeof s == "function")s(this);
         });
         
+        if (this.isMode2D()) {
+            this.render2D();
+        } else {
+            this.render3D();
+        }
+    }
+    
+    // 2D render logic
+    render2D() {
         let outline = this.formatting.outline;
         let hb = this.hitbox;
         
@@ -845,6 +951,12 @@ class gameObject {
         _p5.prototype.fill(this.formatting.color);
         _p5.prototype.rect(0, 0, this.width, this.height);
         _p5.prototype.pop();
+    }
+    
+    // 3D render logic (placeholder)
+    render3D() {
+        // Will be implemented in future versions
+        console.warn("3D rendering not yet implemented");
     }
 
     // ========== HELPFUL METHODS ==========
@@ -896,17 +1008,34 @@ class gameObject {
     distanceTo(target) {
         let dx = target.x !== undefined ? target.x - this.x : target[0] - this.x;
         let dy = target.y !== undefined ? target.y - this.y : target[1] - this.y;
+        
+        if (this.isMode3D()) {
+            let dz = target.z !== undefined ? target.z - this.z : 0;
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        
         return Math.sqrt(dx * dx + dy * dy);
     }
     
     collidesWith(other) {
-        return (this.x < other.x + other.width &&
-                this.x + this.width > other.x &&
-                this.y < other.y + other.height &&
-                this.y + this.height > other.y);
+        if (this.isMode2D()) {
+            return (this.x < other.x + other.width &&
+                    this.x + this.width > other.x &&
+                    this.y < other.y + other.height &&
+                    this.y + this.height > other.y);
+        } else {
+            // 3D collision detection (placeholder)
+            console.warn("3D collision not yet implemented");
+            return false;
+        }
     }
     
     directionTo(x, y, err = 0.5) {
+        if (this.isMode3D()) {
+            console.warn("3D direction not yet implemented");
+            return 0;
+        }
+        
         let pa = [x - this.x, y - this.y];
         
         let angle = this.rotation;
@@ -967,19 +1096,27 @@ class gameObject {
     }
     
     pointTo(target) {
-        this.rotation = this.directionTo(target);
+        if (target.x !== undefined && target.y !== undefined) {
+            this.rotation = this.directionTo(target.x, target.y);
+        }
         return this;
     }
     
-    setPosition(x, y) {
+    setPosition(x, y, z) {
         this.x = x;
         this.y = y;
+        if (this.isMode3D() && z !== undefined) {
+            this.z = z;
+        }
         return this;
     }
     
-    move(dx, dy) {
+    move(dx, dy, dz) {
         this.x += dx;
         this.y += dy;
+        if (this.isMode3D() && dz !== undefined) {
+            this.z += dz;
+        }
         return this;
     }
     
@@ -1005,9 +1142,15 @@ class gameObject {
     
     clone() {
         let clone = new gameObject(this.x, this.y, this.width, this.height, ...this.scenes);
+        clone.z = this.z;
+        clone.depth = this.depth;
         clone.rotation = this.rotation;
+        clone.rotationX = this.rotationX;
+        clone.rotationY = this.rotationY;
+        clone.rotationZ = this.rotationZ;
         clone.rotationMode = this.rotationMode;
         clone.velocity = [...this.velocity];
+        clone.velocity3D = [...this.velocity3D];
         clone.velocityMode = this.velocityMode;
         clone.rvm = this.rvm;
         clone.formatting = JSON.parse(JSON.stringify(this.formatting));
@@ -1018,27 +1161,32 @@ class gameObject {
     }
 
     screenToWorld(screenX, screenY) {
-        if (window.camera && typeof window.camera.screenToWorld == "function") {
-            return window.camera.screenToWorld(screenX, screenY);
+        if (MALC.camera && typeof MALC.camera.screenToWorld == "function") {
+            return MALC.camera.screenToWorld(screenX, screenY);
         }
         return { x: screenX, y: screenY };
     }
     
     isOnScreen() {
-        if (!window.camera) return true;
+        if (!MALC.camera) return true;
         
-        let cameraPos = window.camera.getOrientation();
-        let screenRight = cameraPos[0] + window.camera.width;
-        let screenBottom = cameraPos[1] + window.camera.height;
+        let cameraPos = MALC.camera.getOrientation();
+        let screenRight = cameraPos[0] + MALC.camera.width;
+        let screenBottom = cameraPos[1] + MALC.camera.height;
         
         return (this.x + this.width/2 > cameraPos[0] &&
                 this.x - this.width/2 < screenRight &&
                 this.y + this.height/2 > cameraPos[1] &&
                 this.y - this.height/2 < screenBottom);
     }
+    
+    // Helper method for radians conversion without p5
+    _toRadians(degrees) {
+        return degrees * Math.PI / 180;
+    }
 }
 
-// ========== BUTTON CLASS ==========
+// ========== BUTTON CLASS (MODE-AWARE) ==========
 class Button extends gameObject {
     static buttons = [];
     
@@ -1102,21 +1250,21 @@ class Button extends gameObject {
         this.events = {
             hover: (err = 0) => {
                 return !this.isDisabled && (
-                    window.mouse.x < this.x + this.width / 2 + err &&
-                    window.mouse.x > this.x - (this.width / 2 + err) &&
-                    window.mouse.y < this.y + this.height / 2 + err &&
-                    window.mouse.y > this.y - (this.height / 2 + err)
+                    MALC.mouse.x < this.x + this.width / 2 + err &&
+                    MALC.mouse.x > this.x - (this.width / 2 + err) &&
+                    MALC.mouse.y < this.y + this.height / 2 + err &&
+                    MALC.mouse.y > this.y - (this.height / 2 + err)
                 );
             },
             pressed: () => {
-                return this.events.hover() && window.mouse.down;
+                return this.events.hover() && MALC.mouse.down;
             },
             clicked: () => {
                 let wasPressed = this.wasPressed;
                 let isHovering = this.events.hover();
-                let mouseReleased = !window.mouse.down && wasPressed;
+                let mouseReleased = !MALC.mouse.down && wasPressed;
 
-                this.wasPressed = window.mouse.down && isHovering;
+                this.wasPressed = MALC.mouse.down && isHovering;
 
                 return mouseReleased && isHovering;
             }
@@ -1152,44 +1300,44 @@ class Button extends gameObject {
     }
 
     render() {
-    if (!this.active) return;
-    
-    let btnFormat = this.formatting.button;
-    let buttonColor;
-    
-    if (this.isDisabled) {
-        buttonColor = btnFormat.colors.disabled;
-    } else if (this.isPressed) {
-        buttonColor = btnFormat.colors.pressed;
-    } else if (this.isHovered) {
-        buttonColor = btnFormat.colors.hover;
-    } else {
-        buttonColor = btnFormat.colors.normal;
+        if (!this.active) return;
+        
+        let btnFormat = this.formatting.button;
+        let buttonColor;
+        
+        if (this.isDisabled) {
+            buttonColor = btnFormat.colors.disabled;
+        } else if (this.isPressed) {
+            buttonColor = btnFormat.colors.pressed;
+        } else if (this.isHovered) {
+            buttonColor = btnFormat.colors.hover;
+        } else {
+            buttonColor = btnFormat.colors.normal;
+        }
+        
+        let originalColor = this.formatting.color;
+        this.formatting.color = buttonColor;
+        
+        super.render();
+        
+        if(!this.visible) return;
+        
+        _p5.prototype.push();
+        _p5.prototype.translate(this.x, this.y);
+        if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
+        _p5.prototype.rotate(this.rotation);
+        
+        _p5.prototype.textStyle(btnFormat.text.style);
+        _p5.prototype.textSize(btnFormat.text.size);
+        _p5.prototype.fill(btnFormat.text.color);
+        
+        // Use the standalone coloredText function
+        coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
+        
+        _p5.prototype.pop();
+        
+        this.formatting.color = originalColor;
     }
-    
-    let originalColor = this.formatting.color;
-    this.formatting.color = buttonColor;
-    
-    super.render();
-    
-    if(!this.visible) return;
-    
-    _p5.prototype.push();
-    _p5.prototype.translate(this.x, this.y);
-    if (this.rotationMode == "degrees") _p5.prototype.angleMode(_p5.prototype.DEGREES);
-    _p5.prototype.rotate(this.rotation);
-    
-    _p5.prototype.textStyle(btnFormat.text.style);
-    _p5.prototype.textSize(btnFormat.text.size);
-    _p5.prototype.fill(btnFormat.text.color);
-    
-    // Use the standalone coloredText function
-    coloredText(btnFormat.text.display, 0, 0, _p5.prototype.CENTER, _p5.prototype.CENTER);
-    
-    _p5.prototype.pop();
-    
-    this.formatting.color = originalColor;
-}
     
     // ========== BUTTON-SPECIFIC HELPER METHODS ==========
     
@@ -1267,8 +1415,9 @@ class Button extends gameObject {
 }
 
 // ========== UIPLANE CLASS ==========
-class UIPlane {
+class UIPlane extends ModeAware {
     constructor(executable, formatting = [], ...scenes) {
+        super();
         this.executable = executable;
         
         this.formatting = {
@@ -1482,12 +1631,12 @@ class UIPlane {
         let [mode, offsetX, offsetY] = this.formatting.orientation;
         
         if (mode.toLowerCase() == "camera") {
-            if (window.camera) {
+            if (MALC.camera) {
                 let cameraPos;
-                if (typeof window.camera.getOrientation == "function") {
-                    cameraPos = window.camera.getOrientation();
+                if (typeof MALC.camera.getOrientation == "function") {
+                    cameraPos = MALC.camera.getOrientation();
                 } else {
-                    cameraPos = [window.camera.x || 0, window.camera.y || 0];
+                    cameraPos = [MALC.camera.x || 0, MALC.camera.y || 0];
                 }
                 _p5.prototype.translate(cameraPos[0] + offsetX, cameraPos[1] + offsetY);
             } else {
@@ -1499,8 +1648,8 @@ class UIPlane {
             try {
                 let coords = mode.split(",").map(Number);
                 if (coords.length >= 2) {
-                    if (window.camera && typeof window.camera.worldToScreen == "function") {
-                        let screenPos = window.camera.worldToScreen(coords[0], coords[1]);
+                    if (MALC.camera && typeof MALC.camera.worldToScreen == "function") {
+                        let screenPos = MALC.camera.worldToScreen(coords[0], coords[1]);
                         _p5.prototype.translate(screenPos.x + offsetX, screenPos.y + offsetY);
                     } else {
                         _p5.prototype.translate(coords[0] + offsetX, coords[1] + offsetY);
@@ -1622,16 +1771,19 @@ class UIPlane {
     }
 }
 
-// ========== CAMERA CLASS ==========
-class Camera {
+// ========== CAMERA CLASS (MODE-AWARE) ==========
+class Camera extends ModeAware {
     constructor(canvasX, canvasY) {
+        super();
         this.x = canvasX/2;
         this.y = canvasY/2;
+        this.z = 0; // For 3D
         this.position = [CENTER, CENTER];
         this.width = canvasX;
         this.height = canvasY;
         this.offsetX = 0;
         this.offsetY = 0;
+        this.offsetZ = 0; // For 3D
         this.targetObject = null;
     }
     
@@ -1654,7 +1806,7 @@ class Camera {
         return [topLeftX, topLeftY];
     }
     
-    link(object, offsetX = 0, offsetY = 0) {
+    link(object, offsetX = 0, offsetY = 0, offsetZ = 0) {
         if (!Number(object.x) && !Number(object.y)) {
             console.log(new Error(`TypeError: camera.link parameter must be an object that contains x, y values!`));
             return;
@@ -1663,6 +1815,7 @@ class Camera {
         this.targetObject = object;
         this.offsetX = offsetX;
         this.offsetY = offsetY;
+        this.offsetZ = offsetZ;
         
         this.updatePosition();
     }
@@ -1672,6 +1825,7 @@ class Camera {
         
         let objX = this.targetObject.x;
         let objY = this.targetObject.y;
+        let objZ = this.targetObject.z || 0;
         
         if (this.position[0] == LEFT) {
             this.x = objX - this.offsetX - this.width/2;
@@ -1688,11 +1842,17 @@ class Camera {
         } else if (this.position[1] == BOTTOM) {
             this.y = objY - this.offsetY + this.height/2;
         }
+        
+        // Update Z for 3D mode
+        if (this.isMode3D()) {
+            this.z = objZ - this.offsetZ;
+        }
     }
     
-    setOffset(offsetX, offsetY) {
+    setOffset(offsetX, offsetY, offsetZ) {
         this.offsetX = offsetX;
         this.offsetY = offsetY;
+        if (offsetZ !== undefined) this.offsetZ = offsetZ;
         this.updatePosition();
     }
     
@@ -1701,30 +1861,48 @@ class Camera {
             this.updatePosition();
         }
         
-        let [translateX, translateY] = this.getOrientation();
-        _p5.prototype.translate(-translateX, -translateY);
+        if (this.isMode2D()) {
+            let [translateX, translateY] = this.getOrientation();
+            _p5.prototype.translate(-translateX, -translateY);
+        } else {
+            // 3D camera rendering (placeholder)
+            console.warn("3D camera rendering not yet implemented");
+        }
     }
     
     unlink() {
         this.targetObject = null;
         this.offsetX = 0;
         this.offsetY = 0;
+        this.offsetZ = 0;
     }
     
-    worldToScreen(worldX, worldY) {
-        let [topLeftX, topLeftY] = this.getOrientation();
-        return {
-            x: worldX - topLeftX,
-            y: worldY - topLeftY
-        };
+    worldToScreen(worldX, worldY, worldZ) {
+        if (this.isMode2D()) {
+            let [topLeftX, topLeftY] = this.getOrientation();
+            return {
+                x: worldX - topLeftX,
+                y: worldY - topLeftY
+            };
+        } else {
+            // 3D world to screen (placeholder)
+            console.warn("3D worldToScreen not yet implemented");
+            return { x: worldX, y: worldY, z: worldZ };
+        }
     }
     
-    screenToWorld(screenX, screenY) {
-        let [topLeftX, topLeftY] = this.getOrientation();
-        return {
-            x: screenX + topLeftX,
-            y: screenY + topLeftY
-        };
+    screenToWorld(screenX, screenY, screenZ) {
+        if (this.isMode2D()) {
+            let [topLeftX, topLeftY] = this.getOrientation();
+            return {
+                x: screenX + topLeftX,
+                y: screenY + topLeftY
+            };
+        } else {
+            // 3D screen to world (placeholder)
+            console.warn("3D screenToWorld not yet implemented");
+            return { x: screenX, y: screenY, z: screenZ };
+        }
     }
 }
 
@@ -2382,8 +2560,8 @@ function getFPS() {
 const helpDocs = {
     // Game Engine Overview
     overview: `
-        MALC Game Engine - A comprehensive 2D game engine for p5.js
-        Version: 1.0.3
+        MALC Game Engine - A comprehensive 2D/3D game engine for p5.js
+        Version: 1.1.0
         
         Core Features:
         - Scene management system
@@ -2395,6 +2573,7 @@ const helpDocs = {
         - Mouse, Keyboard, and Gamepad input handlers
         - Colored text rendering
         - FPS tracking
+        - 2D/3D mode support (3D features coming soon)
     `,
     
     // Classes
@@ -2405,10 +2584,16 @@ const helpDocs = {
             properties: {
                 x: "X position of the object",
                 y: "Y position of the object",
+                z: "Z position of the object (3D mode only)",
                 width: "Width of the object",
                 height: "Height of the object",
+                depth: "Depth of the object (3D mode only)",
                 rotation: "Rotation angle in degrees",
+                rotationX: "X-axis rotation (3D mode only)",
+                rotationY: "Y-axis rotation (3D mode only)",
+                rotationZ: "Z-axis rotation (3D mode only)",
                 velocity: "[speed, angle] for polar mode or [vx, vy] for cartesian",
+                velocity3D: "[vx, vy, vz] for 3D mode",
                 gravity: "Object containing gravity settings (enabled, velocity, grounded, etc.)",
                 active: "Whether the object is active",
                 visible: "Whether the object is visible",
@@ -2555,7 +2740,8 @@ const helpDocs = {
     quickStart: `
         // 1. Initialize the engine in setup()
         function setup() {
-            MALC.init(800, 600); // Initialize with canvas size
+            MALC.init("2D"); // Initialize in 2D mode
+            createCanvas(800, 600); // Create canvas separately
         }
         
         // 2. Create a scene
@@ -2575,7 +2761,10 @@ const helpDocs = {
 
 // ========== MALC MAIN OBJECT ==========
 const MALC = {
-    version: "1.0.8", // Increment version
+    version: "1.1.0",
+    mode: MODE_2D, // Default mode
+    MODE_2D: MODE_2D,
+    MODE_3D: MODE_3D,
     
     // Core classes
     gameObject: gameObject,
@@ -2597,6 +2786,9 @@ const MALC = {
     time: new Date(),
     startTime: new Date().getTime(),
     timer: 0,
+    
+    // Camera (will be initialized in init)
+    camera: null,
     
     // Utility functions
     generateId: generateId,
@@ -2691,20 +2883,31 @@ const MALC = {
         return topics;
     },
     
-    // Initialize the engine
-    init: function(canvasX, canvasY) {
-        // Use the p5 instance that was passed to the factory function
-        _p5.prototype.createCanvas(canvasX, canvasY);
+    // Initialize the engine (mode only, no canvas creation)
+    init: function(mode = MODE_2D) {
+        // Set the mode
+        if (mode === MODE_2D || mode === MODE_3D) {
+            this.mode = mode;
+        } else {
+            console.warn(`Invalid mode "${mode}". Defaulting to 2D mode.`);
+            this.mode = MODE_2D;
+        }
+        
+        // Check for 3D mode
+        if (this.mode === MODE_3D) {
+            console.warn("3D mode is not yet fully implemented in this version. Some features may not work.");
+        }
         
         this.time = new Date();
         this.startTime = this.time.getTime();
-        
-        // Initialize camera
-        window.camera = new Camera(canvasX, canvasY);
+        this.timer = 0;
         
         // Initialize mouse handler
         this.mouse = new MouseHandler();
         window.mouse = this.mouse;
+        
+        // Initialize camera (with default dimensions - will be updated when canvas is created)
+        this.camera = new Camera(800, 600);
         
         // Start FPS tracking
         refreshLoop();
@@ -2713,7 +2916,6 @@ const MALC = {
         new Scene("blank", 70);
         new Scene("loading", 50, function(self) {
             try {
-                // Use _p5.prototype here too
                 _p5.prototype.textSize(24);
                 let timed = (self.timeActive / 250 % 4);
                 let dots = "";
@@ -2737,21 +2939,25 @@ const MALC = {
         
         Scene.activeScene = "loading";
         
-        console.log("MALC Game Engine initialized v" + this.version);
+        console.log(`MALC Game Engine initialized v${this.version} in ${this.mode} mode`);
         console.log("Type MALC.help() for documentation");
     },
     
     // Update all systems (call in draw)
     update: function() {
-        // This was incorrectly placed in your file - it belongs in the MALC object
         this.time = new Date();
         this.timer = this.time - this.startTime;
         
         if (this.mouse) {
             this.mouse.rawX = _p5.prototype.mouseX;
             this.mouse.rawY = _p5.prototype.mouseY;
-            this.mouse.x = this.mouse.rawX + window.camera.getOrientation()[0];
-            this.mouse.y = this.mouse.rawY + window.camera.getOrientation()[1];
+            if (this.camera) {
+                this.mouse.x = this.mouse.rawX + this.camera.getOrientation()[0];
+                this.mouse.y = this.mouse.rawY + this.camera.getOrientation()[1];
+            } else {
+                this.mouse.x = this.mouse.rawX;
+                this.mouse.y = this.mouse.rawY;
+            }
             this.mouse.down = _p5.prototype.mouseIsPressed;
         }
         
@@ -2762,10 +2968,18 @@ const MALC = {
         
         this.fps = fps;
         
-        if (typeof window.camera.render == "function") {
-            window.camera.render();
+        if (this.camera && typeof this.camera.render == "function") {
+            this.camera.render();
         }
         Scene.update();
+    },
+    
+    // Update camera dimensions when canvas is resized
+    setCanvasDimensions: function(width, height) {
+        if (this.camera) {
+            this.camera.width = width;
+            this.camera.height = height;
+        }
     }
 };
 
